@@ -1,0 +1,23 @@
+version: v1
+servers:
+  - name: my-mcp-server
+    # image and imageTag will be auto-updated by 'mcp-runtime build push'
+    route: /my-mcp-server/mcp
+    port: 8088
+    replicas: 1
+    namespace: default
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    envVars:
+      ENV_VAR_1: "value1"
+      ENV_VAR_2: "value2"
+
+  - name: another-server
+    # image and imageTag will be auto-updated by 'mcp-runtime build push'
+    route: /another-server/mcp
+    port: 8088

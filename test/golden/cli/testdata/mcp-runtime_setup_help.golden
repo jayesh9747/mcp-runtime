@@ -1,0 +1,19 @@
+Setup the complete MCP platform including:
+- Kubernetes cluster initialization
+- Internal container registry deployment (Docker Registry)
+- Operator deployment
+- Ingress controller configuration
+
+The platform deploys an internal Docker registry by default, which teams
+will use to push and pull container images.
+
+Usage:
+  mcp-runtime setup [flags]
+
+Flags:
+      --force-ingress-install     Force ingress install even if an ingress class already exists
+  -h, --help                      help for setup
+      --ingress string            Ingress controller to install automatically during setup (traefik|none) (default "traefik")
+      --ingress-manifest string   Manifest to apply when installing the ingress controller (default "config/ingress/traefik.yaml")
+      --registry-storage string   Registry storage size (default: 20Gi) (default "20Gi")
+      --registry-type string      Registry type: docker (default), harbor (default "docker")

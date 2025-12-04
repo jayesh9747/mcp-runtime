@@ -1,0 +1,24 @@
+MCP Runtime CLI provides commands to manage the MCP platform including:
+- Container registry
+- Kubernetes cluster
+- MCP server deployments
+- Platform configuration
+
+Usage:
+  mcp-runtime [command]
+
+Available Commands:
+  cluster     Manage Kubernetes cluster
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
+  pipeline    Pipeline integration commands
+  registry    Manage container registry
+  server      Manage MCP servers
+  setup       Setup the complete MCP platform
+  status      Show platform status
+
+Flags:
+  -h, --help      help for mcp-runtime
+  -v, --version   version for mcp-runtime
+
+Use "mcp-runtime [command] --help" for more information about a command.

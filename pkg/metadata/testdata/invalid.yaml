@@ -1,0 +1,4 @@
+version: v1
+servers:
+  - name: missing
+    port: not-a-number

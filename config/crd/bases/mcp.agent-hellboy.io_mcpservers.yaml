@@ -1,0 +1,118 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mcpservers.mcp.agent-hellboy.io
+spec:
+  group: mcp.agent-hellboy.io
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              image:
+                type: string
+                description: Container image for the MCP server
+              imageTag:
+                type: string
+                description: Tag of the container image
+                default: "latest"
+              registryOverride:
+                type: string
+                description: Override the registry host for the image
+              useProvisionedRegistry:
+                type: boolean
+                description: Use the provisioned registry URL from operator env/config
+              imagePullSecrets:
+                type: array
+                description: Image pull secrets to attach to the pod
+                items:
+                  type: string
+              replicas:
+                type: integer
+                description: Number of desired replicas
+                minimum: 1
+                default: 1
+              port:
+                type: integer
+                description: Port the container listens on
+                default: 8088
+              servicePort:
+                type: integer
+                description: Port exposed by the service
+                default: 80
+              ingressPath:
+                type: string
+                description: Path for the ingress route
+              ingressHost:
+                type: string
+                description: Hostname for the ingress
+              resources:
+                type: object
+                properties:
+                  limits:
+                    type: object
+                    properties:
+                      cpu:
+                        type: string
+                      memory:
+                        type: string
+                  requests:
+                    type: object
+                    properties:
+                      cpu:
+                        type: string
+                      memory:
+                        type: string
+              envVars:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    value:
+                      type: string
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+              message:
+                type: string
+              deploymentReady:
+                type: boolean
+              serviceReady:
+                type: boolean
+              ingressReady:
+                type: boolean
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+    subresources:
+      status: {}
+  scope: Namespaced
+  names:
+    plural: mcpservers
+    singular: mcpserver
+    kind: MCPServer
+    shortNames:
+    - mcp
