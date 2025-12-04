@@ -168,51 +168,6 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 	return nil
 }
 
-// parseDeploymentOutput collects resource lines, warning lines, and raw lines for summary.
-func parseDeploymentOutput(out []byte) (resources []string, warnings []string, raw []string) {
-	if len(out) == 0 {
-		return nil, nil, nil
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, line := range lines {
-		raw = append(raw, line)
-		switch {
-		case strings.HasPrefix(line, "# Warning"):
-			warnings = append(warnings, line)
-		case strings.HasPrefix(line, "namespace/") ||
-			strings.HasPrefix(line, "customresourcedefinition.") ||
-			strings.HasPrefix(line, "serviceaccount/") ||
-			strings.HasPrefix(line, "clusterrole") ||
-			strings.HasPrefix(line, "clusterrolebinding") ||
-			strings.HasPrefix(line, "deployment"):
-			resources = append(resources, line)
-		default:
-			// ignore other lines for summary
-		}
-	}
-	return resources, warnings, raw
-}
-
-func printSummary(resources, warnings, raw []string) {
-	fmt.Printf("\nSummary\n")
-	if len(resources) > 0 {
-		fmt.Println("Resources:")
-		for i, r := range resources {
-			fmt.Printf("  %d. %s\n", i+1, r)
-		}
-	}
-	if len(warnings) > 0 {
-		fmt.Println("Warnings:")
-		for i, w := range warnings {
-			fmt.Printf("  %d. %s\n", i+1, w)
-		}
-	}
-	if len(warnings) > 0 {
-		fmt.Println("\nPlease review and address the warnings above if possible.")
-	}
-}
-
 func verifySetup() error {
 	printStep("Step 5: Verify platform components")
 
@@ -277,38 +232,6 @@ func buildOperatorImage(image string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-func loadOperatorImageToCluster(image string) error {
-	printInfo(fmt.Sprintf("Attempting to load image into cluster: %s", image))
-	ctxCmd := exec.Command("kubectl", "config", "current-context")
-	ctxOut, err := ctxCmd.Output()
-	if err != nil {
-		return err
-	}
-	context := strings.TrimSpace(string(ctxOut))
-	lc := strings.ToLower(context)
-	switch {
-	case strings.Contains(lc, "minikube"):
-		cmd := exec.Command("minikube", "image", "load", image)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	case strings.HasPrefix(lc, "kind-"):
-		cmd := exec.Command("kind", "load", "docker-image", image, "--name", strings.TrimPrefix(context, "kind-"))
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	case strings.HasPrefix(lc, "k3d-"):
-		cluster := strings.TrimPrefix(context, "k3d-")
-		cmd := exec.Command("k3d", "image", "import", image, "--cluster", cluster)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	default:
-		printWarn(fmt.Sprintf("Unknown cluster context '%s'; ensure the image %s is in a registry the cluster can pull from (set OPERATOR_IMG to override).", context, image))
-		return nil
-	}
 }
 
 func restartDeployment(name, namespace string) error {
