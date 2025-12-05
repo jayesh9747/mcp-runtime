@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,7 +85,7 @@ func newRegistryProvisionCmd(logger *zap.Logger) *cobra.Command {
 			if err := saveExternalRegistryConfig(cfg); err != nil {
 				return fmt.Errorf("failed to save registry config: %w", err)
 			}
-			if cfg.Username != "" || cfg.Password != "" {
+			if cfg.Username != "" && cfg.Password != "" {
 				logger.Info("Performing docker login to external registry", zap.String("url", cfg.URL))
 				if err := loginRegistry(logger, cfg.URL, cfg.Username, cfg.Password); err != nil {
 					return err
@@ -406,10 +405,16 @@ func showRegistryInfo(logger *zap.Logger) error {
 	ns := "registry"
 	// Get registry service
 	cmd := exec.Command("kubectl", "get", "service", "registry", "-n", ns, "-o", "jsonpath={.spec.clusterIP}")
-	clusterIP, _ := cmd.Output()
+	clusterIP, err := cmd.Output()
+	if err != nil {
+		logger.Debug("Failed to get registry cluster IP", zap.Error(err))
+	}
 
 	cmd = exec.Command("kubectl", "get", "service", "registry", "-n", ns, "-o", "jsonpath={.spec.ports[0].port}")
-	port, _ := cmd.Output()
+	port, portErr := cmd.Output()
+	if portErr != nil {
+		logger.Debug("Failed to get registry port", zap.Error(portErr))
+	}
 
 	if len(clusterIP) > 0 && len(port) > 0 {
 		fmt.Println("\n=== Registry Information ===")
@@ -472,7 +477,7 @@ func pushDirect(source, target string) error {
 }
 
 func pushInCluster(logger *zap.Logger, source, target, helperNS string) error {
-	helperName := fmt.Sprintf("registry-pusher-%d", time.Now().UnixNano()+int64(rand.Intn(1000)))
+	helperName := fmt.Sprintf("registry-pusher-%d", time.Now().UnixNano())
 
 	nsCheck := exec.Command("kubectl", "get", "namespace", helperNS)
 	if err := nsCheck.Run(); err != nil {
@@ -498,7 +503,7 @@ func pushInCluster(logger *zap.Logger, source, target, helperNS string) error {
 	}
 
 	// Start helper pod with skopeo
-	runCmd := exec.Command("kubectl", "run", helperName, "-n", helperNS, "--image=quay.io/skopeo/stable", "--restart=Never", "--command", "--", "sh", "-c", "while true; do sleep 3600; done")
+	runCmd := exec.Command("kubectl", "run", helperName, "-n", helperNS, "--image=quay.io/skopeo/stable:v1.14", "--restart=Never", "--command", "--", "sh", "-c", "while true; do sleep 3600; done")
 	runCmd.Stdout = os.Stdout
 	runCmd.Stderr = os.Stderr
 	if err := runCmd.Run(); err != nil {

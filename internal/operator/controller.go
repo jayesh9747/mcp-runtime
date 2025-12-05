@@ -294,27 +294,20 @@ func rewriteRegistry(image, registry string) string {
 	return fmt.Sprintf("%s/%s", registry, strings.Join(parts, "/"))
 }
 
-func buildImagePullSecrets(secrets []string) []corev1.LocalObjectReference {
-	if len(secrets) == 0 {
-		return nil
-	}
-	out := make([]corev1.LocalObjectReference, 0, len(secrets))
-	for _, s := range secrets {
-		if s == "" {
-			continue
-		}
-		out = append(out, corev1.LocalObjectReference{Name: s})
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 func (r *MCPServerReconciler) buildImagePullSecrets(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer) []corev1.LocalObjectReference {
 	// If user specified pull secrets, honor them.
 	if len(mcpServer.Spec.ImagePullSecrets) > 0 {
-		return buildImagePullSecrets(mcpServer.Spec.ImagePullSecrets)
+		out := make([]corev1.LocalObjectReference, 0, len(mcpServer.Spec.ImagePullSecrets))
+		for _, s := range mcpServer.Spec.ImagePullSecrets {
+			if s == "" {
+				continue
+			}
+			out = append(out, corev1.LocalObjectReference{Name: s})
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
 	}
 
 	// Otherwise, optionally auto-create/use a pull secret from provisioned registry creds.
@@ -473,11 +466,6 @@ func (r *MCPServerReconciler) reconcileIngress(ctx context.Context, mcpServer *m
 					},
 				},
 			},
-		}
-
-		// Set ingress class name if specified
-		if ingressClassName != "" {
-			ingress.Spec.IngressClassName = &ingressClassName
 		}
 
 		// Build annotations based on ingress class

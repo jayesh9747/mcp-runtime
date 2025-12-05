@@ -102,11 +102,11 @@ type MCPServerStatus struct {
 
 // Condition represents a condition status
 type Condition struct {
-	Type               string      `json:"type"`
-	Status             string      `json:"status"`
-	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
-	Reason             string      `json:"reason,omitempty"`
-	Message            string      `json:"message,omitempty"`
+	Type               string                 `json:"type"`
+	Status             metav1.ConditionStatus `json:"status"`
+	LastTransitionTime metav1.Time            `json:"lastTransitionTime,omitempty"`
+	Reason             string                 `json:"reason,omitempty"`
+	Message            string                 `json:"message,omitempty"`
 }
 
 //+kubebuilder:object:root=true

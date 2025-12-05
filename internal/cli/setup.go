@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -388,10 +389,9 @@ func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 		return fmt.Errorf("failed to read manager.yaml: %w", err)
 	}
 
-	// Replace image name (simple string replacement)
-	// Original: image: mcp-runtime-operator:latest
-	// Replace with: image: <operatorImage>
-	managerYAMLStr := strings.ReplaceAll(string(managerYAML), "image: mcp-runtime-operator:latest", fmt.Sprintf("image: %s", operatorImage))
+	// Replace image name using regex to be resilient to spacing changes.
+	re := regexp.MustCompile(`image:\s*mcp-runtime-operator:\S+`)
+	managerYAMLStr := re.ReplaceAllString(string(managerYAML), fmt.Sprintf("image: %s", operatorImage))
 
 	// Write to temp file and apply
 	tmpFile, err := os.CreateTemp("", "manager-*.yaml")
