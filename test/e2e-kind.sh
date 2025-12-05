@@ -134,6 +134,10 @@ echo "[verify] curling service from inside cluster"
 kubectl -n mcp-servers run curl --rm -i --image=curlimages/curl --restart=Never --command -- \
   sh -c "curl -s http://example-mcp-server.mcp-servers.svc.cluster.local/" | tee /tmp/mcp-e2e-curl.log
 
+# Ensure Traefik is ready before port-forwarding to it
+echo "[verify] waiting for Traefik ingress controller to be ready"
+kubectl rollout status deploy/traefik -n traefik --timeout=180s
+
 echo "[verify] curling ingress via Traefik (port-forwarded)"
 PF_LOG="$(mktemp)"
 kubectl port-forward -n traefik svc/traefik 18080:80 >"${PF_LOG}" 2>&1 &
@@ -144,6 +148,7 @@ curl -i -H "Host: example.local" http://127.0.0.1:18080/example-mcp-server/mcp -
 ING_RC=${PIPESTATUS[0]}
 set -e
 kill "${PF_PID}" >/dev/null 2>&1 || true
+wait "${PF_PID}" 2>/dev/null || true
 if [ "${ING_RC}" -ne 0 ]; then
   echo "[error] ingress curl failed, port-forward log:"
   cat "${PF_LOG}" || true
