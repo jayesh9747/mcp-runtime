@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const defaultClusterName = "mcp-runtime"
+
 type ingressOptions struct {
 	mode     string
 	manifest string
@@ -94,19 +96,21 @@ func newClusterProvisionCmd(logger *zap.Logger) *cobra.Command {
 	var provider string
 	var region string
 	var nodeCount int
+	var clusterName string
 
 	cmd := &cobra.Command{
 		Use:   "provision",
 		Short: "Provision a new cluster",
 		Long:  "Provision a new Kubernetes cluster (requires cloud provider credentials)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return provisionCluster(logger, provider, region, nodeCount)
+			return provisionCluster(logger, provider, region, nodeCount, clusterName)
 		},
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "kind", "Cloud provider (kind, gke, eks, aks)")
 	cmd.Flags().StringVar(&region, "region", "us-west-1", "Region for cluster")
 	cmd.Flags().IntVar(&nodeCount, "nodes", 3, "Number of nodes")
+	cmd.Flags().StringVar(&clusterName, "name", defaultClusterName, "Cluster name (used by supported providers)")
 
 	return cmd
 }
@@ -120,6 +124,10 @@ func initCluster(logger *zap.Logger, kubeconfig, context string) error {
 			return fmt.Errorf("failed to get home directory: %w", err)
 		}
 		kubeconfig = filepath.Join(home, ".kube", "config")
+	}
+
+	if _, err := os.Stat(kubeconfig); err != nil {
+		return fmt.Errorf("kubeconfig %q not found or not readable: %w", kubeconfig, err)
 	}
 
 	// Set KUBECONFIG environment variable
@@ -249,25 +257,30 @@ func configureCluster(logger *zap.Logger, ingress ingressOptions) error {
 	logger.Info("Cluster configuration complete")
 	return nil
 }
-func provisionCluster(logger *zap.Logger, provider, region string, nodeCount int) error {
-	logger.Info("Provisioning cluster", zap.String("provider", provider), zap.String("region", region))
+func provisionCluster(logger *zap.Logger, provider, region string, nodeCount int, clusterName string) error {
+	logger.Info("Provisioning cluster", zap.String("provider", provider), zap.String("region", region), zap.String("name", clusterName))
 
 	switch provider {
 	case "kind":
-		return provisionKindCluster(logger, nodeCount)
+		return provisionKindCluster(logger, nodeCount, clusterName)
 	case "gke":
-		return provisionGKECluster(logger, region, nodeCount)
+		return provisionGKECluster(logger, region, nodeCount, clusterName)
 	case "eks":
-		return provisionEKSCluster(logger, region, nodeCount)
+		return provisionEKSCluster(logger, region, nodeCount, clusterName)
 	case "aks":
-		return provisionAKSCluster(logger, region, nodeCount)
+		return provisionAKSCluster(logger, region, nodeCount, clusterName)
 	default:
 		return fmt.Errorf("unsupported provider: %s", provider)
 	}
 }
 
-func provisionKindCluster(logger *zap.Logger, nodeCount int) error {
+func provisionKindCluster(logger *zap.Logger, nodeCount int, name string) error {
 	logger.Info("Provisioning Kind cluster")
+
+	clusterName := name
+	if clusterName == "" {
+		clusterName = defaultClusterName
+	}
 
 	config := `kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -279,13 +292,18 @@ nodes:
 	}
 
 	// Write config to temp file
-	tmpFile := "/tmp/kind-config.yaml"
-	if err := os.WriteFile(tmpFile, []byte(config), 0644); err != nil {
+	tmp, err := os.CreateTemp("", "mcp-kind-config-*.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to create temp kind config: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(config); err != nil {
+		tmp.Close()
 		return fmt.Errorf("failed to write kind config: %w", err)
 	}
-	defer os.Remove(tmpFile)
+	tmp.Close()
 
-	cmd := exec.Command("kind", "create", "cluster", "--config", tmpFile, "--name", "mcp-runtime")
+	cmd := exec.Command("kind", "create", "cluster", "--config", tmp.Name(), "--name", clusterName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -297,16 +315,25 @@ nodes:
 	return nil
 }
 
-func provisionGKECluster(logger *zap.Logger, region string, nodeCount int) error {
-	return fmt.Errorf("GKE provisioning not yet implemented; create the cluster with gcloud, e.g. `gcloud container clusters create mcp-runtime --region %s --num-nodes %d`", region, nodeCount)
+func provisionGKECluster(logger *zap.Logger, region string, nodeCount int, clusterName string) error {
+	if clusterName == "" {
+		clusterName = defaultClusterName
+	}
+	return fmt.Errorf("GKE provisioning not yet implemented; create the cluster with gcloud, e.g. `gcloud container clusters create %s --region %s --num-nodes %d`", clusterName, region, nodeCount)
 }
 
-func provisionEKSCluster(logger *zap.Logger, region string, nodeCount int) error {
-	return fmt.Errorf("EKS provisioning not yet implemented; create the cluster with eksctl, e.g. `eksctl create cluster --name mcp-runtime --region %s --nodes %d`", region, nodeCount)
+func provisionEKSCluster(logger *zap.Logger, region string, nodeCount int, clusterName string) error {
+	if clusterName == "" {
+		clusterName = defaultClusterName
+	}
+	return fmt.Errorf("EKS provisioning not yet implemented; create the cluster with eksctl, e.g. `eksctl create cluster --name %s --region %s --nodes %d`", clusterName, region, nodeCount)
 }
 
-func provisionAKSCluster(logger *zap.Logger, region string, nodeCount int) error {
-	return fmt.Errorf("AKS provisioning not yet implemented; create the cluster with az, e.g. `az aks create --name mcp-runtime --resource-group <rg> --location %s --node-count %d`", region, nodeCount)
+func provisionAKSCluster(logger *zap.Logger, region string, nodeCount int, clusterName string) error {
+	if clusterName == "" {
+		clusterName = defaultClusterName
+	}
+	return fmt.Errorf("AKS provisioning not yet implemented; create the cluster with az, e.g. `az aks create --name %s --resource-group <rg> --location %s --node-count %d`", clusterName, region, nodeCount)
 }
 
 // ensureNamespace applies/creates a namespace idempotently.

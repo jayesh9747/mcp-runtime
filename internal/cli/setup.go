@@ -14,6 +14,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const defaultRegistrySecretName = "mcp-runtime-registry-creds"
+
 func NewSetupCmd(logger *zap.Logger) *cobra.Command {
 	var registryType string
 	var registryStorageSize string
@@ -54,7 +56,7 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 		printWarn(fmt.Sprintf("Could not load external registry config: %v", err))
 	}
 	usingExternalRegistry := extRegistry != nil
-	registrySecretName := "mcp-runtime-registry-creds"
+	registrySecretName := defaultRegistrySecretName
 
 	// Step 1: Initialize cluster
 	printStep("Step 1: Initialize cluster")
@@ -99,6 +101,7 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 
 		printInfo("Waiting for registry to be ready...")
 		if err := waitForDeploymentAvailable(logger, "registry", "registry", "app=registry", 5*time.Minute); err != nil {
+			printDeploymentDiagnostics("registry", "registry", "app=registry")
 			printError(fmt.Sprintf("Registry failed to become ready: %v", err))
 			return err
 		}
@@ -217,7 +220,7 @@ func configureProvisionedRegistryEnv(ext *ExternalRegistryConfig, secretName str
 		return nil
 	}
 	if secretName == "" {
-		secretName = "mcp-runtime-registry-creds"
+		secretName = defaultRegistrySecretName
 	}
 	args := []string{
 		"set", "env", "deployment/mcp-runtime-operator-controller-manager",
@@ -361,7 +364,7 @@ func printDeploymentDiagnostics(deploy, namespace, selector string) {
 func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 	// Step 1: Apply CRD
 	printInfo("Applying CRD manifests")
-	cmd := exec.Command("kubectl", "apply", "-f", "config/crd/bases/mcp.agent-hellboy.io_mcpservers.yaml")
+	cmd := exec.Command("kubectl", "apply", "--validate=false", "-f", "config/crd/bases/mcp.agent-hellboy.io_mcpservers.yaml")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
