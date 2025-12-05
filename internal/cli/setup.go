@@ -219,7 +219,8 @@ func configureProvisionedRegistryEnv(ext *ExternalRegistryConfig, secretName str
 	if ext == nil || ext.URL == "" {
 		return nil
 	}
-	if secretName == "" {
+	hasCreds := ext.Username != "" || ext.Password != ""
+	if hasCreds && secretName == "" {
 		secretName = defaultRegistrySecretName
 	}
 	args := []string{
@@ -227,13 +228,11 @@ func configureProvisionedRegistryEnv(ext *ExternalRegistryConfig, secretName str
 		"-n", "mcp-runtime",
 		"PROVISIONED_REGISTRY_URL=" + ext.URL,
 	}
-	if secretName != "" {
-		args = append(args, "PROVISIONED_REGISTRY_SECRET_NAME="+secretName)
-	}
-	if ext.Username != "" || ext.Password != "" {
+	if hasCreds {
 		if err := ensureProvisionedRegistrySecret(secretName, ext.Username, ext.Password); err != nil {
 			return err
 		}
+		args = append(args, "PROVISIONED_REGISTRY_SECRET_NAME="+secretName)
 		// Populate env vars from the secret instead of literals to avoid leaking creds in args/history.
 		args = append(args, "--from=secret/"+secretName)
 	}
@@ -392,8 +391,8 @@ func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 		return fmt.Errorf("failed to read manager.yaml: %w", err)
 	}
 
-	// Replace image name using regex to be resilient to spacing changes.
-	re := regexp.MustCompile(`image:\s*mcp-runtime-operator:\S+`)
+	// Replace image name using regex to be resilient to spacing changes and registry prefixes.
+	re := regexp.MustCompile(`image:\s*\S*mcp-runtime-operator:\S+`)
 	managerYAMLStr := re.ReplaceAllString(string(managerYAML), fmt.Sprintf("image: %s", operatorImage))
 
 	// Write to temp file and apply

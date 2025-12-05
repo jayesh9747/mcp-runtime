@@ -1,4 +1,6 @@
-.PHONY: build test clean install dev fmt lint coverage
+.PHONY: all build test clean install dev fmt lint coverage
+
+all: build
 
 -include Makefile.runtime
 
