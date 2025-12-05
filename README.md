@@ -403,8 +403,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Platform Support
 
 Officially supported on:
-- **macOS**: Intel (amd64) and Apple Silicon (arm64)
-- **Ubuntu/Linux**: x86_64 (amd64) and ARM64
+under dev
 
 Tested on:
 - macOS Sonoma (M1/M4 chips)
