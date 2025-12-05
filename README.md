@@ -26,7 +26,7 @@ MCP Runtime Platform provides a streamlined workflow for teams to deploy a suite
 
 ## Architecture
 
-```
+```text
 ├── cmd/                 # Application entry points
 │   ├── mcp-runtime/     # Platform management CLI
 │   └── operator/        # Kubernetes operator
@@ -304,7 +304,7 @@ make -f Makefile.operator generate
 
 ### Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │  CI/CD Runner (GitHub Actions, GitLab CI, etc.)            │
 │                                                             │

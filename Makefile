@@ -40,7 +40,8 @@ lint:
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		golangci-lint run; \
 	else \
-		echo "golangci-lint not found, skipping lint"; \
+		echo "golangci-lint not found. Please install from https://github.com/golangci/golangci-lint#install"; \
+		exit 1; \
 	fi
 
 # Generate code coverage report
