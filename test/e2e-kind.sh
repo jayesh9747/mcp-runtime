@@ -136,14 +136,20 @@ kubectl -n mcp-servers run curl --rm -i --image=curlimages/curl --restart=Never 
 
 # Ensure Traefik is ready before port-forwarding to it
 echo "[verify] waiting for Traefik ingress controller to be ready"
+set +e
 kubectl rollout status deploy/traefik -n traefik --timeout=180s
 TRAEFIK_ROLLOUT_RC=$?
+set -e
 if [ ${TRAEFIK_ROLLOUT_RC} -ne 0 ]; then
   echo "[error] Traefik failed to roll out, collecting diagnostics..."
   kubectl -n traefik get pods -o wide || true
+  kubectl -n traefik get rs -o wide || true
   kubectl -n traefik describe deploy/traefik || true
+  kubectl -n traefik describe rs -l app=traefik || true
   kubectl -n traefik describe pod -l app=traefik || true
   kubectl -n traefik logs -l app=traefik --tail=200 || true
+  kubectl -n traefik get events --sort-by=.metadata.creationTimestamp | tail -n 50 || true
+  kubectl get nodes -o wide || true
   exit ${TRAEFIK_ROLLOUT_RC}
 fi
 
