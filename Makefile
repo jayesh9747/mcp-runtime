@@ -1,4 +1,4 @@
-.PHONY: all build test clean install dev fmt lint coverage
+.PHONY: all build test clean install dev fmt lint coverage build-unix install-bin
 
 all: build
 

@@ -391,9 +391,10 @@ func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 		return fmt.Errorf("failed to read manager.yaml: %w", err)
 	}
 
-	// Replace image name using regex to be resilient to spacing changes and registry prefixes.
-	re := regexp.MustCompile(`image:\s*\S*mcp-runtime-operator:\S+`)
-	managerYAMLStr := re.ReplaceAllString(string(managerYAML), fmt.Sprintf("image: %s", operatorImage))
+	// Replace image name using a broad regex to handle arbitrary custom OPERATOR_IMG values.
+	// This targets the first image field in the file (the manager container).
+	re := regexp.MustCompile(`(?m)^\s*image:\s*\S+`)
+	managerYAMLStr := re.ReplaceAllString(string(managerYAML), fmt.Sprintf("  image: %s", operatorImage))
 
 	// Write to temp file and apply
 	tmpFile, err := os.CreateTemp("", "manager-*.yaml")
