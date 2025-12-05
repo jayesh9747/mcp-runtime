@@ -36,7 +36,7 @@ will use to push and pull container images.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&registryType, "registry-type", "docker", "Registry type: docker (default), harbor")
+	cmd.Flags().StringVar(&registryType, "registry-type", "docker", "Registry type (docker; harbor coming soon)")
 	cmd.Flags().StringVar(&registryStorageSize, "registry-storage", "20Gi", "Registry storage size (default: 20Gi)")
 	cmd.Flags().StringVar(&ingressMode, "ingress", "traefik", "Ingress controller to install automatically during setup (traefik|none)")
 	cmd.Flags().StringVar(&ingressManifest, "ingress-manifest", "config/ingress/traefik.yaml", "Manifest to apply when installing the ingress controller")
@@ -91,7 +91,7 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 		}
 	} else {
 		printInfo(fmt.Sprintf("Type: %s", registryType))
-		if err := deployRegistry(logger, "registry", 5000); err != nil {
+		if err := deployRegistry(logger, "registry", 5000, registryType, registryStorageSize); err != nil {
 			printError(fmt.Sprintf("Registry deployment failed: %v", err))
 			return fmt.Errorf("failed to deploy registry: %w", err)
 		}
@@ -162,7 +162,7 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 	}
 
 	// Step 5: Verify components
-	if err := verifySetup(); err != nil {
+	if err := verifySetup(usingExternalRegistry); err != nil {
 		printError(fmt.Sprintf("Post-setup verification failed: %v", err))
 		return err
 	}
@@ -172,13 +172,17 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 	return nil
 }
 
-func verifySetup() error {
+func verifySetup(usingExternalRegistry bool) error {
 	printStep("Step 5: Verify platform components")
 
-	printInfo("Waiting for registry deployment to be available")
-	if err := waitForDeploymentAvailable(nil, "registry", "registry", "app=registry", 5*time.Minute); err != nil {
-		printDeploymentDiagnostics("registry", "registry", "app=registry")
-		return fmt.Errorf("registry not ready: %w", err)
+	if usingExternalRegistry {
+		printInfo("Skipping internal registry availability check (using external registry)")
+	} else {
+		printInfo("Waiting for registry deployment to be available")
+		if err := waitForDeploymentAvailable(nil, "registry", "registry", "app=registry", 5*time.Minute); err != nil {
+			printDeploymentDiagnostics("registry", "registry", "app=registry")
+			return fmt.Errorf("registry not ready: %w", err)
+		}
 	}
 
 	printInfo("Waiting for operator deployment to be available")

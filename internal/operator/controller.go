@@ -197,7 +197,7 @@ func (r *MCPServerReconciler) reconcileDeployment(ctx context.Context, mcpServer
 			},
 		}
 
-		if mcpServer.Spec.Resources.Limits.CPU != "" || mcpServer.Spec.Resources.Limits.Memory != "" {
+		if mcpServer.Spec.Resources.Limits != nil && (mcpServer.Spec.Resources.Limits.CPU != "" || mcpServer.Spec.Resources.Limits.Memory != "") {
 			deployment.Spec.Template.Spec.Containers[0].Resources.Limits = corev1.ResourceList{}
 			if mcpServer.Spec.Resources.Limits.CPU != "" {
 				cpuLimit, err := resource.ParseQuantity(mcpServer.Spec.Resources.Limits.CPU)
@@ -215,7 +215,7 @@ func (r *MCPServerReconciler) reconcileDeployment(ctx context.Context, mcpServer
 			}
 		}
 
-		if mcpServer.Spec.Resources.Requests.CPU != "" || mcpServer.Spec.Resources.Requests.Memory != "" {
+		if mcpServer.Spec.Resources.Requests != nil && (mcpServer.Spec.Resources.Requests.CPU != "" || mcpServer.Spec.Resources.Requests.Memory != "") {
 			deployment.Spec.Template.Spec.Containers[0].Resources.Requests = corev1.ResourceList{}
 			if mcpServer.Spec.Resources.Requests.CPU != "" {
 				cpuReq, err := resource.ParseQuantity(mcpServer.Spec.Resources.Requests.CPU)

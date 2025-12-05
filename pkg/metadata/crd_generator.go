@@ -42,13 +42,13 @@ func GenerateCRD(server *ServerMetadata, outputPath string) error {
 	// Convert resources
 	if server.Resources != nil {
 		if server.Resources.Limits != nil {
-			mcpServer.Spec.Resources.Limits = mcpv1alpha1.ResourceList{
+			mcpServer.Spec.Resources.Limits = &mcpv1alpha1.ResourceList{
 				CPU:    server.Resources.Limits.CPU,
 				Memory: server.Resources.Limits.Memory,
 			}
 		}
 		if server.Resources.Requests != nil {
-			mcpServer.Spec.Resources.Requests = mcpv1alpha1.ResourceList{
+			mcpServer.Spec.Resources.Requests = &mcpv1alpha1.ResourceList{
 				CPU:    server.Resources.Requests.CPU,
 				Memory: server.Resources.Requests.Memory,
 			}

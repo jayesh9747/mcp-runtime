@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
@@ -85,7 +86,7 @@ func newRegistryProvisionCmd(logger *zap.Logger) *cobra.Command {
 			if err := saveExternalRegistryConfig(cfg); err != nil {
 				return fmt.Errorf("failed to save registry config: %w", err)
 			}
-			if username != "" || password != "" {
+			if cfg.Username != "" || cfg.Password != "" {
 				logger.Info("Performing docker login to external registry", zap.String("url", cfg.URL))
 				if err := loginRegistry(logger, cfg.URL, cfg.Username, cfg.Password); err != nil {
 					return err
@@ -100,8 +101,8 @@ func newRegistryProvisionCmd(logger *zap.Logger) *cobra.Command {
 					return fmt.Errorf("failed to push operator image: %w", err)
 				}
 			}
-			logger.Info("External registry configured", zap.String("url", url))
-			fmt.Printf("External registry configured: %s\n", url)
+			logger.Info("External registry configured", zap.String("url", cfg.URL))
+			fmt.Printf("External registry configured: %s\n", cfg.URL)
 			return nil
 		},
 	}
@@ -279,8 +280,19 @@ func resolveExternalRegistryConfig(flagCfg *ExternalRegistryConfig) (*ExternalRe
 	return &cfg, nil
 }
 
-func deployRegistry(logger *zap.Logger, namespace string, port int) error {
-	logger.Info("Deploying container registry", zap.String("namespace", namespace))
+func deployRegistry(logger *zap.Logger, namespace string, port int, registryType, registryStorageSize string) error {
+	logger.Info("Deploying container registry", zap.String("namespace", namespace), zap.String("type", registryType))
+
+	if registryType == "" {
+		registryType = "docker"
+	}
+
+	switch registryType {
+	case "docker":
+		// continue
+	default:
+		return fmt.Errorf("unsupported registry type %q (supported: docker; harbor coming soon)", registryType)
+	}
 
 	// Ensure Namespace
 	if err := ensureNamespace(namespace); err != nil {
@@ -295,6 +307,10 @@ func deployRegistry(logger *zap.Logger, namespace string, port int) error {
 		return fmt.Errorf("failed to deploy registry: %w", err)
 	}
 
+	if err := ensureRegistryStorageSize(logger, namespace, registryStorageSize); err != nil {
+		return err
+	}
+
 	// Wait for registry to be ready
 	logger.Info("Waiting for registry to be ready")
 	deployTimeout := 5 * time.Minute
@@ -303,6 +319,38 @@ func deployRegistry(logger *zap.Logger, namespace string, port int) error {
 	}
 
 	logger.Info("Registry deployed successfully")
+	return nil
+}
+
+func ensureRegistryStorageSize(logger *zap.Logger, namespace, registryStorageSize string) error {
+	storageSize := strings.TrimSpace(registryStorageSize)
+	if storageSize == "" {
+		return nil
+	}
+
+	getCmd := exec.Command("kubectl", "get", "pvc", "registry-storage", "-n", namespace, "-o", "jsonpath={.spec.resources.requests.storage}")
+	var stdout, stderr bytes.Buffer
+	getCmd.Stdout = &stdout
+	getCmd.Stderr = &stderr
+	if err := getCmd.Run(); err != nil {
+		return fmt.Errorf("failed to read current registry storage size: %w (%s)", err, strings.TrimSpace(stderr.String()))
+	}
+
+	currentSize := strings.TrimSpace(stdout.String())
+	if currentSize == storageSize {
+		logger.Info("Registry storage size already matches requested value", zap.String("size", storageSize))
+		return nil
+	}
+
+	logger.Info("Updating registry storage size", zap.String("from", currentSize), zap.String("to", storageSize))
+	patchPayload := fmt.Sprintf(`{"spec":{"resources":{"requests":{"storage":"%s"}}}}`, storageSize)
+	patchCmd := exec.Command("kubectl", "patch", "pvc", "registry-storage", "-n", namespace, "-p", patchPayload)
+	patchCmd.Stdout = os.Stdout
+	patchCmd.Stderr = os.Stderr
+	if err := patchCmd.Run(); err != nil {
+		return fmt.Errorf("failed to update registry storage size to %s: %w", storageSize, err)
+	}
+
 	return nil
 }
 

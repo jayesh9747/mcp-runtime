@@ -55,8 +55,8 @@ type MCPServerSpec struct {
 
 // ResourceRequirements defines resource limits and requests
 type ResourceRequirements struct {
-	Limits   ResourceList `json:"limits,omitempty"`
-	Requests ResourceList `json:"requests,omitempty"`
+	Limits   *ResourceList `json:"limits,omitempty"`
+	Requests *ResourceList `json:"requests,omitempty"`
 }
 
 //+kubebuilder:object:generate=true
