@@ -1,0 +1,12 @@
+Build MCP server images (push via `registry push`)
+
+Usage:
+  mcp-runtime server build [command]
+
+Available Commands:
+  image       Build Docker image for an MCP server
+
+Flags:
+  -h, --help   help for build
+
+Use "mcp-runtime server build [command] --help" for more information about a command.

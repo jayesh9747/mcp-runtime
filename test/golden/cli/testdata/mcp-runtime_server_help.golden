@@ -1,0 +1,21 @@
+Commands for managing MCP server deployments.
+
+For building images from source, use 'server build'.
+For pushing images, use 'registry push'.
+
+Usage:
+  mcp-runtime server [command]
+
+Available Commands:
+  build       Build MCP server images (push via `registry push`)
+  create      Create an MCP server
+  delete      Delete an MCP server
+  get         Get MCP server details
+  list        List MCP servers
+  logs        View server logs
+  status      Show MCP server runtime status (pods, images, pull secrets)
+
+Flags:
+  -h, --help   help for server
+
+Use "mcp-runtime server [command] --help" for more information about a command.

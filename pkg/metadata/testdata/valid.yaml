@@ -1,0 +1,10 @@
+version: v1
+servers:
+  - name: test-server
+  - name: custom-server
+    image: custom/image
+    imageTag: v1
+    route: custom-route
+    port: 9090
+    replicas: 3
+    namespace: custom-namespace

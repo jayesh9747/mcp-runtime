@@ -1,0 +1,15 @@
+Commands for managing the container registry
+
+Usage:
+  mcp-runtime registry [command]
+
+Available Commands:
+  info        Show registry information
+  provision   Configure an external registry
+  push        Retag and push an image to the platform or provisioned registry
+  status      Check registry status
+
+Flags:
+  -h, --help   help for registry
+
+Use "mcp-runtime registry [command] --help" for more information about a command.
