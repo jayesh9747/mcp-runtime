@@ -158,10 +158,15 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 
 	if usingExternalRegistry {
 		if err := configureProvisionedRegistryEnv(extRegistry, registrySecretName); err != nil {
-			printWarn(fmt.Sprintf("Could not set PROVISIONED_REGISTRY_* env on operator: %v", err))
+			printError(fmt.Sprintf("Failed to set PROVISIONED_REGISTRY_* env on operator: %v", err))
+			return fmt.Errorf("failed to configure external registry env on operator: %w", err)
 		}
 	}
 	if err := restartDeployment("mcp-runtime-operator-controller-manager", "mcp-runtime"); err != nil {
+		if usingExternalRegistry {
+			printError(fmt.Sprintf("Failed to restart operator deployment to pick up registry env: %v", err))
+			return fmt.Errorf("failed to restart operator deployment after registry env update: %w", err)
+		}
 		printWarn(fmt.Sprintf("Could not restart operator deployment: %v", err))
 	}
 
@@ -391,10 +396,10 @@ func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 		return fmt.Errorf("failed to read manager.yaml: %w", err)
 	}
 
-	// Replace image name using a broad regex to handle arbitrary custom OPERATOR_IMG values.
+	// Replace image name using a broad regex with captured indentation to handle arbitrary custom OPERATOR_IMG values.
 	// This targets the first image field in the file (the manager container).
-	re := regexp.MustCompile(`(?m)^\s*image:\s*\S+`)
-	managerYAMLStr := re.ReplaceAllString(string(managerYAML), fmt.Sprintf("  image: %s", operatorImage))
+	re := regexp.MustCompile(`(?m)^(\s*)image:\s*\S+`)
+	managerYAMLStr := re.ReplaceAllString(string(managerYAML), fmt.Sprintf("${1}image: %s", operatorImage))
 
 	// Write to temp file and apply
 	tmpFile, err := os.CreateTemp("", "manager-*.yaml")
