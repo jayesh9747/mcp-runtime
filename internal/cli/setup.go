@@ -16,6 +16,68 @@ import (
 
 const defaultRegistrySecretName = "mcp-runtime-registry-creds"
 
+// Default values (can be overridden via environment variables)
+const (
+	defaultDeploymentTimeout = 5 * time.Minute
+	defaultCertTimeout       = 60 * time.Second
+	defaultRegistryPort      = 5000
+	defaultSkopeoImage       = "quay.io/skopeo/stable:v1.14"
+	defaultServerPort        = 8088
+)
+
+// getDeploymentTimeout returns the deployment wait timeout from MCP_DEPLOYMENT_TIMEOUT env var or default.
+func getDeploymentTimeout() time.Duration {
+	if val := os.Getenv("MCP_DEPLOYMENT_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			return d
+		}
+	}
+	return defaultDeploymentTimeout
+}
+
+// getCertTimeout returns the certificate issuance timeout from MCP_CERT_TIMEOUT env var or default.
+func getCertTimeout() time.Duration {
+	if val := os.Getenv("MCP_CERT_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			return d
+		}
+	}
+	return defaultCertTimeout
+}
+
+// getRegistryPort returns the registry port from MCP_REGISTRY_PORT env var or default (5000).
+func getRegistryPort() int {
+	if val := os.Getenv("MCP_REGISTRY_PORT"); val != "" {
+		if port, err := strconv.Atoi(val); err == nil && port > 0 && port < 65536 {
+			return port
+		}
+	}
+	return defaultRegistryPort
+}
+
+// getSkopeoImage returns the skopeo image from MCP_SKOPEO_IMAGE env var or default.
+func getSkopeoImage() string {
+	if val := os.Getenv("MCP_SKOPEO_IMAGE"); val != "" {
+		return val
+	}
+	return defaultSkopeoImage
+}
+
+// getOperatorImageOverride returns MCP_OPERATOR_IMAGE if set, empty string otherwise.
+func getOperatorImageOverride() string {
+	return os.Getenv("MCP_OPERATOR_IMAGE")
+}
+
+// getDefaultServerPort returns the default MCP server port from MCP_DEFAULT_SERVER_PORT env var or default (8088).
+func getDefaultServerPort() int {
+	if val := os.Getenv("MCP_DEFAULT_SERVER_PORT"); val != "" {
+		if port, err := strconv.Atoi(val); err == nil && port > 0 && port < 65536 {
+			return port
+		}
+	}
+	return defaultServerPort
+}
+
 // NewSetupCmd constructs the top-level setup command for installing the platform.
 func NewSetupCmd(logger *zap.Logger) *cobra.Command {
 	var registryType string
@@ -99,8 +161,18 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 	}
 	printInfo("Cluster configuration complete")
 
-	// Step 3: Deploy internal container registry
-	printStep("Step 3: Configure registry")
+	// Step 3: Configure TLS (if enabled)
+	if tlsEnabled {
+		printStep("Step 3: Configure TLS")
+		if err := setupTLS(logger); err != nil {
+			printError(fmt.Sprintf("TLS setup failed: %v", err))
+			return fmt.Errorf("TLS setup failed: %w", err)
+		}
+		printSuccess("TLS configured successfully")
+	}
+
+	// Step 4: Deploy internal container registry
+	printStep("Step 4: Configure registry")
 	if usingExternalRegistry {
 		printInfo(fmt.Sprintf("Using external registry: %s", extRegistry.URL))
 		if extRegistry.Username != "" || extRegistry.Password != "" {
@@ -117,13 +189,13 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 		} else {
 			printInfo("TLS: disabled (dev HTTP mode)")
 		}
-		if err := deployRegistry(logger, "registry", 5000, registryType, registryStorageSize, registryManifest); err != nil {
+		if err := deployRegistry(logger, "registry", getRegistryPort(), registryType, registryStorageSize, registryManifest); err != nil {
 			printError(fmt.Sprintf("Registry deployment failed: %v", err))
 			return fmt.Errorf("failed to deploy registry: %w", err)
 		}
 
 		printInfo("Waiting for registry to be ready...")
-		if err := waitForDeploymentAvailable(logger, "registry", "registry", "app=registry", 5*time.Minute); err != nil {
+		if err := waitForDeploymentAvailable(logger, "registry", "registry", "app=registry", getDeploymentTimeout()); err != nil {
 			printDeploymentDiagnostics("registry", "registry", "app=registry")
 			printError(fmt.Sprintf("Registry failed to become ready: %v", err))
 			return err
@@ -132,8 +204,8 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 		showRegistryInfo(logger)
 	}
 
-	// Step 4: Deploy operator
-	printStep("Step 4: Deploy operator")
+	// Step 5: Deploy operator
+	printStep("Step 5: Deploy operator")
 
 	operatorImage := getOperatorImage(extRegistry, testMode)
 	printInfo(fmt.Sprintf("Image: %s", operatorImage))
@@ -209,14 +281,14 @@ func verifySetup(usingExternalRegistry bool) error {
 		printInfo("Skipping internal registry availability check (using external registry)")
 	} else {
 		printInfo("Waiting for registry deployment to be available")
-		if err := waitForDeploymentAvailable(nil, "registry", "registry", "app=registry", 5*time.Minute); err != nil {
+		if err := waitForDeploymentAvailable(nil, "registry", "registry", "app=registry", getDeploymentTimeout()); err != nil {
 			printDeploymentDiagnostics("registry", "registry", "app=registry")
 			return fmt.Errorf("registry not ready: %w", err)
 		}
 	}
 
 	printInfo("Waiting for operator deployment to be available")
-	if err := waitForDeploymentAvailable(nil, "mcp-runtime-operator-controller-manager", "mcp-runtime", "control-plane=controller-manager", 5*time.Minute); err != nil {
+	if err := waitForDeploymentAvailable(nil, "mcp-runtime-operator-controller-manager", "mcp-runtime", "control-plane=controller-manager", getDeploymentTimeout()); err != nil {
 		printDeploymentDiagnostics("mcp-runtime-operator-controller-manager", "mcp-runtime", "control-plane=controller-manager")
 		return fmt.Errorf("operator not ready: %w", err)
 	}
@@ -231,6 +303,11 @@ func verifySetup(usingExternalRegistry bool) error {
 }
 
 func getOperatorImage(ext *ExternalRegistryConfig, testMode bool) string {
+	// Check for explicit override first
+	if override := getOperatorImageOverride(); override != "" {
+		return override
+	}
+
 	// In test mode, use the standard kind-loaded image
 	if testMode {
 		return "docker.io/library/mcp-runtime-operator:latest"
@@ -448,5 +525,62 @@ func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 	}
 
 	printSuccess("Operator manifests deployed successfully")
+	return nil
+}
+
+// setupTLS configures TLS by applying cert-manager resources.
+// Prerequisites: cert-manager must be installed and CA secret must exist.
+func setupTLS(logger *zap.Logger) error {
+	// Check if cert-manager CRDs are installed
+	printInfo("Checking cert-manager installation")
+	cmd := exec.Command("kubectl", "get", "crd", "certificates.cert-manager.io")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("cert-manager not installed. Install it first:\n  helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set crds.enabled=true")
+	}
+	printInfo("cert-manager CRDs found")
+
+	// Check if CA secret exists
+	printInfo("Checking CA secret")
+	cmd = exec.Command("kubectl", "get", "secret", "mcp-runtime-ca", "-n", "cert-manager")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("CA secret 'mcp-runtime-ca' not found in cert-manager namespace. Create it first:\n  kubectl create secret tls mcp-runtime-ca --cert=ca.crt --key=ca.key -n cert-manager")
+	}
+	printInfo("CA secret found")
+
+	// Apply ClusterIssuer
+	printInfo("Applying ClusterIssuer")
+	cmd = exec.Command("kubectl", "apply", "-f", "config/cert-manager/cluster-issuer.yaml")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to apply ClusterIssuer: %w", err)
+	}
+
+	// Ensure registry namespace exists before applying Certificate
+	if err := ensureNamespace("registry"); err != nil {
+		return fmt.Errorf("failed to create registry namespace: %w", err)
+	}
+
+	// Apply Certificate
+	printInfo("Applying Certificate for registry")
+	cmd = exec.Command("kubectl", "apply", "-f", "config/cert-manager/example-registry-certificate.yaml")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to apply Certificate: %w", err)
+	}
+
+	// Wait for certificate to be ready using kubectl wait
+	certTimeout := getCertTimeout()
+	printInfo(fmt.Sprintf("Waiting for certificate to be issued (timeout: %s)", certTimeout))
+	cmd = exec.Command("kubectl", "wait", "--for=condition=Ready",
+		"certificate/registry-cert", "-n", "registry",
+		fmt.Sprintf("--timeout=%s", certTimeout))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("certificate not ready after %s. Check cert-manager logs: kubectl logs -n cert-manager deployment/cert-manager", certTimeout)
+	}
+	printInfo("Certificate issued successfully")
 	return nil
 }

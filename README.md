@@ -80,10 +80,33 @@ mcp-runtime registry push --image my-app:latest
 ### Ingress
 
 - **Default**: Traefik is installed automatically (HTTP mode)
-- **TLS**: Use `mcp-runtime setup --with-tls` for HTTPS
+- **TLS**: Use `mcp-runtime setup --with-tls` for HTTPS (see TLS section below)
 - **Custom**: Use `--ingress none` if you have your own ingress controller
 
 All MCP servers get routes at `/{server-name}/mcp` automatically.
+
+### TLS Setup
+
+To enable HTTPS, you need cert-manager and a CA secret:
+
+```bash
+# 1. Install cert-manager
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true
+
+# 2. Create CA secret (use your own CA cert/key)
+kubectl create secret tls mcp-runtime-ca \
+  --cert=ca.crt --key=ca.key -n cert-manager
+
+# 3. Run setup with TLS
+mcp-runtime setup --with-tls
+```
+
+The `--with-tls` flag automatically:
+- Applies ClusterIssuer and Certificate resources
+- Configures Traefik with HTTPS
+- Configures registry with TLS ingress
 
 ### Defaults
 
@@ -93,6 +116,29 @@ The platform sets sensible defaults:
 - Ingress routes
 
 Override any defaults in your server metadata if needed.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_DEPLOYMENT_TIMEOUT` | `5m` | Timeout for deployment readiness checks |
+| `MCP_CERT_TIMEOUT` | `60s` | Timeout for TLS certificate issuance |
+| `MCP_REGISTRY_PORT` | `5000` | Registry port for internal registry |
+| `MCP_SKOPEO_IMAGE` | `quay.io/skopeo/stable:v1.14` | Skopeo image for in-cluster image transfers (useful for air-gapped environments) |
+| `MCP_OPERATOR_IMAGE` | (auto) | Override operator image (bypasses build/push) |
+| `MCP_DEFAULT_SERVER_PORT` | `8088` | Default container port for MCP servers |
+
+Examples:
+```bash
+# Slow cluster - increase timeouts
+MCP_DEPLOYMENT_TIMEOUT=10m mcp-runtime setup
+
+# Air-gapped environment - use local skopeo image
+MCP_SKOPEO_IMAGE=my-registry.local/skopeo:v1.14 mcp-runtime registry push myimage
+
+# Use pre-built operator image
+MCP_OPERATOR_IMAGE=ghcr.io/myorg/mcp-operator:v1.0 mcp-runtime setup
+```
 
 
 ## Quick Start
@@ -126,7 +172,7 @@ docker build -t my-server:latest .
 
 Your server will be available at: `http://<ingress-host>/my-server/mcp`
 
-For TLS, use `mcp-runtime setup --with-tls` (requires cert-manager).
+For HTTPS, see the [TLS Setup](#tls-setup) section.
 
 ## Examples
 
