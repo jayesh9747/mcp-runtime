@@ -166,30 +166,30 @@ func checkClusterStatus(logger *zap.Logger) error {
 	logger.Info("Checking cluster status")
 
 	// Check cluster connectivity
-	cmd := exec.Command("kubectl", "cluster-info")
+	cmd := execCommand("kubectl", "cluster-info")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("cluster not accessible: %w", err)
 	}
-	fmt.Println(string(output))
+	DefaultPrinter.Println(string(output))
 
 	// Check nodes
-	fmt.Println("\nNodes:")
-	cmd = exec.Command("kubectl", "get", "nodes")
+	Section("Nodes")
+	cmd = execCommand("kubectl", "get", "nodes")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
 
 	// Check CRD
-	fmt.Println("\nMCP CRD:")
-	cmd = exec.Command("kubectl", "get", "crd", "mcpservers.mcp.agent-hellboy.io")
+	Section("MCP CRD")
+	cmd = execCommand("kubectl", "get", "crd", "mcpservers.mcp.agent-hellboy.io")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
 
 	// Check operator
-	fmt.Println("\nOperator:")
-	cmd = exec.Command("kubectl", "get", "pods", "-n", "mcp-runtime")
+	Section("Operator")
+	cmd = execCommand("kubectl", "get", "pods", "-n", "mcp-runtime")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
