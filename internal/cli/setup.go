@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,7 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultRegistrySecretName = "mcp-runtime-registry-creds"
+const defaultRegistrySecretName = "mcp-runtime-registry-creds" // #nosec G101 -- default secret name, not a credential.
 
 // NewSetupCmd constructs the top-level setup command for installing the platform.
 func NewSetupCmd(logger *zap.Logger) *cobra.Command {
@@ -79,7 +78,8 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 	// Step 1: Initialize cluster
 	Step("Step 1: Initialize cluster")
 	Info("Installing CRD")
-	if err := initCluster(logger, "", ""); err != nil {
+	clusterMgr := DefaultClusterManager(logger)
+	if err := clusterMgr.InitCluster("", ""); err != nil {
 		Error(fmt.Sprintf("Cluster initialization failed: %v", err))
 		return fmt.Errorf("failed to initialize cluster: %w", err)
 	}
@@ -93,7 +93,7 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 		manifest: ingressManifest,
 		force:    forceIngressInstall,
 	}
-	if err := configureCluster(logger, ingressOpts); err != nil {
+	if err := clusterMgr.ConfigureCluster(ingressOpts); err != nil {
 		Error(fmt.Sprintf("Cluster configuration failed: %v", err))
 		return fmt.Errorf("cluster configuration failed: %w", err)
 	}
@@ -141,7 +141,10 @@ func setupPlatform(logger *zap.Logger, registryType, registryStorageSize, ingres
 			return err
 		}
 
-		showRegistryInfo(logger)
+		registryMgr := DefaultRegistryManager(logger)
+		if err := registryMgr.ShowRegistryInfo(); err != nil {
+			Warn(fmt.Sprintf("Failed to show registry info: %v", err))
+		}
 	}
 
 	// Step 5: Deploy operator
@@ -281,10 +284,8 @@ func configureProvisionedRegistryEnv(ext *ExternalRegistryConfig, secretName str
 		// Populate env vars from the secret instead of literals to avoid leaking creds in args/history.
 		args = append(args, "--from=secret/"+secretName)
 	}
-	cmd := exec.Command("kubectl", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	// #nosec G204 -- command arguments are built from trusted inputs and fixed verbs.
+	return kubectlClient.RunWithOutput(args, os.Stdout, os.Stderr)
 }
 
 func ensureProvisionedRegistrySecret(name, username, password string) error {
@@ -303,25 +304,33 @@ func ensureProvisionedRegistrySecret(name, username, password string) error {
 		return nil
 	}
 
-	createCmd := exec.Command(
-		"kubectl", "create", "secret", "generic", name,
+	// #nosec G204 -- command arguments are built from trusted inputs and fixed verbs.
+	createCmd, err := kubectlClient.CommandArgs([]string{
+		"create", "secret", "generic", name,
 		"--from-env-file=-",
-		"-n", "mcp-runtime",
+		"-n", NamespaceMCPRuntime,
 		"--dry-run=client",
 		"-o", "yaml",
-	)
-	createCmd.Stdin = strings.NewReader(envData.String())
+	})
+	if err != nil {
+		return err
+	}
+	createCmd.SetStdin(strings.NewReader(envData.String()))
 	var rendered bytes.Buffer
-	createCmd.Stdout = &rendered
-	createCmd.Stderr = os.Stderr
+	createCmd.SetStdout(&rendered)
+	createCmd.SetStderr(os.Stderr)
 	if err := createCmd.Run(); err != nil {
 		return fmt.Errorf("render secret manifest: %w", err)
 	}
 
-	applyCmd := exec.Command("kubectl", "apply", "-f", "-")
-	applyCmd.Stdin = &rendered
-	applyCmd.Stdout = os.Stdout
-	applyCmd.Stderr = os.Stderr
+	// #nosec G204 -- command arguments are built from trusted inputs and fixed verbs.
+	applyCmd, err := kubectlClient.CommandArgs([]string{"apply", "-f", "-"})
+	if err != nil {
+		return err
+	}
+	applyCmd.SetStdin(&rendered)
+	applyCmd.SetStdout(os.Stdout)
+	applyCmd.SetStderr(os.Stderr)
 	if err := applyCmd.Run(); err != nil {
 		return fmt.Errorf("apply secret manifest: %w", err)
 	}
@@ -330,38 +339,43 @@ func ensureProvisionedRegistrySecret(name, username, password string) error {
 }
 
 func buildOperatorImage(image string) error {
-	cmd := exec.Command("make", "-f", "Makefile.operator", "docker-build-operator", "IMG="+image)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// #nosec G204 -- command arguments are built from trusted inputs and fixed verbs.
+	cmd, err := execCommandWithValidators("make", []string{"-f", "Makefile.operator", "docker-build-operator", "IMG=" + image})
+	if err != nil {
+		return err
+	}
+	cmd.SetStdout(os.Stdout)
+	cmd.SetStderr(os.Stderr)
 	return cmd.Run()
 }
 
 func restartDeployment(name, namespace string) error {
-	cmd := exec.Command("kubectl", "rollout", "restart", "deployment/"+name, "-n", namespace)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	// #nosec G204 -- command arguments are built from trusted inputs and fixed verbs.
+	return kubectlClient.RunWithOutput([]string{"rollout", "restart", "deployment/" + name, "-n", namespace}, os.Stdout, os.Stderr)
 }
 
 func pushOperatorImage(image string) error {
-	cmd := exec.Command("docker", "push", image)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// #nosec G204 -- image from internal build process or validated config.
+	cmd, err := execCommandWithValidators("docker", []string{"push", image})
+	if err != nil {
+		return err
+	}
+	cmd.SetStdout(os.Stdout)
+	cmd.SetStderr(os.Stderr)
 	return cmd.Run()
 }
 
 func pushOperatorImageToInternalRegistry(logger *zap.Logger, sourceImage, targetImage, helperNamespace string) error {
-	if err := pushInCluster(logger, sourceImage, targetImage, helperNamespace); err != nil {
+	mgr := DefaultRegistryManager(logger)
+	if err := mgr.PushInCluster(sourceImage, targetImage, helperNamespace); err != nil {
 		return fmt.Errorf("failed to push image in-cluster: %w", err)
 	}
 	return nil
 }
 
 func checkCRDInstalled(name string) error {
-	cmd := exec.Command("kubectl", "get", "crd", name)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	// #nosec G204 -- name is hardcoded CRD identifier from internal code.
+	return kubectlClient.RunWithOutput([]string{"get", "crd", name}, os.Stdout, os.Stderr)
 }
 
 // waitForDeploymentAvailable polls a deployment until it has at least one available replica or times out.
@@ -369,15 +383,18 @@ func waitForDeploymentAvailable(logger *zap.Logger, name, namespace, selector st
 	deadline := time.Now().Add(timeout)
 	lastLog := time.Time{}
 	for {
-		cmd := exec.Command("kubectl", "get", "deployment", name, "-n", namespace, "-o", "jsonpath={.status.availableReplicas}")
-		out, err := cmd.Output()
+		// #nosec G204 -- name/namespace from internal setup logic, not direct user input.
+		cmd, err := kubectlClient.CommandArgs([]string{"get", "deployment", name, "-n", namespace, "-o", "jsonpath={.status.availableReplicas}"})
 		if err == nil {
-			val := strings.TrimSpace(string(out))
-			if val == "" {
-				val = "0"
-			}
-			if n, convErr := strconv.Atoi(val); convErr == nil && n > 0 {
-				return nil
+			out, execErr := cmd.Output()
+			if execErr == nil {
+				val := strings.TrimSpace(string(out))
+				if val == "" {
+					val = "0"
+				}
+				if n, convErr := strconv.Atoi(val); convErr == nil && n > 0 {
+					return nil
+				}
 			}
 		}
 		if time.Since(lastLog) > 10*time.Second {
@@ -397,10 +414,8 @@ func waitForDeploymentAvailable(logger *zap.Logger, name, namespace, selector st
 // printDeploymentDiagnostics prints a quick status of pods for a deployment selector to help users triage readiness issues.
 func printDeploymentDiagnostics(deploy, namespace, selector string) {
 	Warn(fmt.Sprintf("Deployment %s in %s is not ready. Showing pod statuses:", deploy, namespace))
-	cmd := exec.Command("kubectl", "get", "pods", "-n", namespace, "-l", selector, "-o", "wide")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
+	// #nosec G204 -- namespace/selector from internal diagnostics, not user input.
+	_ = kubectlClient.RunWithOutput([]string{"get", "pods", "-n", namespace, "-l", selector, "-o", "wide"}, os.Stdout, os.Stderr)
 }
 
 // deployOperatorManifests deploys operator manifests without requiring kustomize or controller-gen.
@@ -408,23 +423,19 @@ func printDeploymentDiagnostics(deploy, namespace, selector string) {
 func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 	// Step 1: Apply CRD
 	Info("Applying CRD manifests")
-	cmd := exec.Command("kubectl", "apply", "--validate=false", "-f", "config/crd/bases/mcp.agent-hellboy.io_mcpservers.yaml")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// #nosec G204 -- fixed file path from repository.
+	if err := kubectlClient.RunWithOutput([]string{"apply", "--validate=false", "-f", "config/crd/bases/mcp.agent-hellboy.io_mcpservers.yaml"}, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("failed to apply CRD: %w", err)
 	}
 
 	// Step 2: Apply RBAC (ServiceAccount, Role, RoleBinding)
 	Info("Applying RBAC manifests")
-	if err := ensureNamespace("mcp-runtime"); err != nil {
+	if err := ensureNamespace(NamespaceMCPRuntime); err != nil {
 		return fmt.Errorf("failed to ensure operator namespace: %w", err)
 	}
 
-	cmd = exec.Command("kubectl", "apply", "-k", "config/rbac/")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// #nosec G204 -- fixed kustomize path from repository.
+	if err := kubectlClient.RunWithOutput([]string{"apply", "-k", "config/rbac/"}, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("failed to apply RBAC: %w", err)
 	}
 
@@ -441,26 +452,29 @@ func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 	re := regexp.MustCompile(`(?m)^(\s*)image:\s*\S+`)
 	managerYAMLStr := re.ReplaceAllString(string(managerYAML), fmt.Sprintf("${1}image: %s", operatorImage))
 
-	// Write to temp file and apply
-	tmpFile, err := os.CreateTemp("", "manager-*.yaml")
+	// Write to temp file under the working directory so kubectl path validation passes.
+	tmpFile, err := os.CreateTemp(".", "manager-*.yaml")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer os.Remove(tmpFile.Name())
 
 	if _, err := tmpFile.WriteString(managerYAMLStr); err != nil {
-		tmpFile.Close()
+		if closeErr := tmpFile.Close(); closeErr != nil {
+			return fmt.Errorf("failed to close temp file after write error: %w", closeErr)
+		}
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
 
 	// Delete existing deployment to avoid immutable selector conflicts on reapply.
-	_ = exec.Command("kubectl", "delete", "deployment/mcp-runtime-operator-controller-manager", "-n", "mcp-runtime", "--ignore-not-found").Run()
+	// #nosec G204 -- command arguments are built from trusted inputs and fixed verbs.
+	_ = kubectlClient.Run([]string{"delete", "deployment/" + OperatorDeploymentName, "-n", NamespaceMCPRuntime, "--ignore-not-found"})
 
-	cmd = exec.Command("kubectl", "apply", "-f", tmpFile.Name())
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// #nosec G204 -- command arguments are built from trusted inputs and fixed verbs.
+	if err := kubectlClient.RunWithOutput([]string{"apply", "-f", tmpFile.Name()}, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("failed to apply manager deployment: %w", err)
 	}
 
@@ -473,52 +487,48 @@ func deployOperatorManifests(logger *zap.Logger, operatorImage string) error {
 func setupTLS(logger *zap.Logger) error {
 	// Check if cert-manager CRDs are installed
 	Info("Checking cert-manager installation")
-	cmd := exec.Command("kubectl", "get", "crd", "certificates.cert-manager.io")
-	if err := cmd.Run(); err != nil {
+	// #nosec G204 -- fixed kubectl command to check CRD.
+	if err := kubectlClient.Run([]string{"get", "crd", CertManagerCRDName}); err != nil {
 		return fmt.Errorf("cert-manager not installed. Install it first:\n  helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set crds.enabled=true")
 	}
 	Info("cert-manager CRDs found")
 
 	// Check if CA secret exists
 	Info("Checking CA secret")
-	cmd = exec.Command("kubectl", "get", "secret", "mcp-runtime-ca", "-n", "cert-manager")
-	if err := cmd.Run(); err != nil {
+	// #nosec G204 -- fixed kubectl command to check secret.
+	if err := kubectlClient.Run([]string{"get", "secret", "mcp-runtime-ca", "-n", "cert-manager"}); err != nil {
 		return fmt.Errorf("CA secret 'mcp-runtime-ca' not found in cert-manager namespace. Create it first:\n  kubectl create secret tls mcp-runtime-ca --cert=ca.crt --key=ca.key -n cert-manager")
 	}
 	Info("CA secret found")
 
 	// Apply ClusterIssuer
 	Info("Applying ClusterIssuer")
-	cmd = exec.Command("kubectl", "apply", "-f", "config/cert-manager/cluster-issuer.yaml")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// #nosec G204 -- fixed file path from repository.
+	if err := kubectlClient.RunWithOutput([]string{"apply", "-f", "config/cert-manager/cluster-issuer.yaml"}, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("failed to apply ClusterIssuer: %w", err)
 	}
 
 	// Ensure registry namespace exists before applying Certificate
-	if err := ensureNamespace("registry"); err != nil {
+	if err := ensureNamespace(NamespaceRegistry); err != nil {
 		return fmt.Errorf("failed to create registry namespace: %w", err)
 	}
 
 	// Apply Certificate
 	Info("Applying Certificate for registry")
-	cmd = exec.Command("kubectl", "apply", "-f", "config/cert-manager/example-registry-certificate.yaml")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// #nosec G204 -- fixed file path from repository.
+	if err := kubectlClient.RunWithOutput([]string{"apply", "-f", "config/cert-manager/example-registry-certificate.yaml"}, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("failed to apply Certificate: %w", err)
 	}
 
 	// Wait for certificate to be ready using kubectl wait
 	certTimeout := GetCertTimeout()
 	Info(fmt.Sprintf("Waiting for certificate to be issued (timeout: %s)", certTimeout))
-	cmd = exec.Command("kubectl", "wait", "--for=condition=Ready",
-		"certificate/registry-cert", "-n", "registry",
-		fmt.Sprintf("--timeout=%s", certTimeout))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// #nosec G204 -- command arguments are built from trusted inputs and fixed verbs.
+	if err := kubectlClient.RunWithOutput([]string{
+		"wait", "--for=condition=Ready",
+		"certificate/registry-cert", "-n", NamespaceRegistry,
+		fmt.Sprintf("--timeout=%s", certTimeout),
+	}, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("certificate not ready after %s. Check cert-manager logs: kubectl logs -n cert-manager deployment/cert-manager", certTimeout)
 	}
 	Info("Certificate issued successfully")
