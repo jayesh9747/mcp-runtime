@@ -89,6 +89,7 @@ func TestHelperProcess(t *testing.T) {
 	if response.ExitCode != 0 {
 		os.Exit(response.ExitCode)
 	}
+	os.Exit(0)
 }
 
 func TestShowPlatformStatus(t *testing.T) {
@@ -117,6 +118,7 @@ func TestShowPlatformStatus(t *testing.T) {
 		var buf bytes.Buffer
 		pterm.SetDefaultOutput(&buf)
 		pterm.DisableStyling()
+		setDefaultPrinterWriter(t, &buf)
 		t.Cleanup(func() {
 			pterm.SetDefaultOutput(os.Stdout)
 			pterm.EnableStyling()
@@ -155,6 +157,7 @@ func TestServerStatus(t *testing.T) {
 		var buf bytes.Buffer
 		pterm.SetDefaultOutput(&buf)
 		pterm.DisableStyling()
+		setDefaultPrinterWriter(t, &buf)
 		t.Cleanup(func() {
 			pterm.SetDefaultOutput(os.Stdout)
 			pterm.EnableStyling()
@@ -169,6 +172,37 @@ func TestServerStatus(t *testing.T) {
 		output := buf.String()
 		if !strings.Contains(output, "boom-out") || !strings.Contains(output, "boom-err") {
 			t.Fatalf("expected combined output to be logged, got output: %s", output)
+		}
+	})
+
+	t.Run("prints warning when no servers found", func(t *testing.T) {
+		logger := zap.NewNop()
+		namespace := "mcp-servers"
+		responses := map[string]commandResponse{
+			commandKey("kubectl", "get", "mcpserver", "-n", namespace, "-o", "jsonpath={range .items[*]}{.metadata.name}|{.spec.image}:{.spec.imageTag}|{.spec.replicas}|{.spec.ingressPath}|{.spec.useProvisionedRegistry}{\"\\n\"}{end}"): {},
+		}
+
+		origExec := execCommand
+		execCommand = fakeExecCommand(t, origExec, responses, nil)
+		t.Cleanup(func() { execCommand = origExec })
+
+		var buf bytes.Buffer
+		pterm.SetDefaultOutput(&buf)
+		pterm.DisableStyling()
+		setDefaultPrinterWriter(t, &buf)
+		t.Cleanup(func() {
+			pterm.SetDefaultOutput(os.Stdout)
+			pterm.EnableStyling()
+		})
+
+		mgr := DefaultServerManager(logger)
+		if err := mgr.ServerStatus(namespace); err != nil {
+			t.Fatalf("serverStatus() unexpected error = %v", err)
+		}
+
+		output := buf.String()
+		if !strings.Contains(output, "No MCP servers found in namespace "+namespace) {
+			t.Fatalf("expected no servers warning, got output: %s", output)
 		}
 	})
 
@@ -206,6 +240,42 @@ func TestServerStatus(t *testing.T) {
 			t.Fatalf("expected managed-by label selector, got calls: %v", calls)
 		}
 	})
+
+	t.Run("prints no pods found when only header returned", func(t *testing.T) {
+		logger := zap.NewNop()
+		namespace := "mcp-servers"
+		responses := map[string]commandResponse{
+			commandKey("kubectl", "get", "mcpserver", "-n", namespace, "-o", "jsonpath={range .items[*]}{.metadata.name}|{.spec.image}:{.spec.imageTag}|{.spec.replicas}|{.spec.ingressPath}|{.spec.useProvisionedRegistry}{\"\\n\"}{end}"): {
+				Stdout: "server1|image:tag|1|/server|false\n",
+			},
+			commandKey("kubectl", "get", "pods", "-n", namespace, "-l", "app.kubernetes.io/managed-by=mcp-runtime", "-o", "custom-columns=NAME:.metadata.name,READY:.status.containerStatuses[0].ready,STATUS:.status.phase,RESTARTS:.status.containerStatuses[0].restartCount"): {
+				Stdout: "NAME READY STATUS RESTARTS\n",
+			},
+		}
+
+		origExec := execCommand
+		execCommand = fakeExecCommand(t, origExec, responses, nil)
+		t.Cleanup(func() { execCommand = origExec })
+
+		var buf bytes.Buffer
+		pterm.SetDefaultOutput(&buf)
+		pterm.DisableStyling()
+		setDefaultPrinterWriter(t, &buf)
+		t.Cleanup(func() {
+			pterm.SetDefaultOutput(os.Stdout)
+			pterm.EnableStyling()
+		})
+
+		mgr := DefaultServerManager(logger)
+		if err := mgr.ServerStatus(namespace); err != nil {
+			t.Fatalf("serverStatus() unexpected error = %v", err)
+		}
+
+		output := buf.String()
+		if !strings.Contains(output, "No pods found") {
+			t.Fatalf("expected no pods message, got output: %s", output)
+		}
+	})
 }
 
 func TestCheckRegistryStatusQuiet(t *testing.T) {
@@ -214,5 +284,37 @@ func TestCheckRegistryStatusQuiet(t *testing.T) {
 		// This will likely fail in test env without a cluster
 		// but we're testing that it handles errors gracefully
 		_ = checkRegistryStatusQuiet(logger, "nonexistent-namespace")
+	})
+}
+
+func TestNewStatusCmd(t *testing.T) {
+	logger := zap.NewNop()
+	cmd := NewStatusCmd(logger)
+
+	t.Run("command_created", func(t *testing.T) {
+		if cmd == nil {
+			t.Fatal("NewStatusCmd should not return nil")
+		}
+		if cmd.Use != "status" {
+			t.Errorf("expected Use='status', got %q", cmd.Use)
+		}
+		if cmd.Short == "" {
+			t.Error("expected Short description to be set")
+		}
+	})
+
+	t.Run("has_runE", func(t *testing.T) {
+		if cmd.RunE == nil {
+			t.Error("expected RunE to be set")
+		}
+	})
+}
+
+func setDefaultPrinterWriter(t *testing.T, w *bytes.Buffer) {
+	t.Helper()
+	orig := DefaultPrinter.Writer
+	DefaultPrinter.Writer = w
+	t.Cleanup(func() {
+		DefaultPrinter.Writer = orig
 	})
 }

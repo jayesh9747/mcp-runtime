@@ -11,14 +11,22 @@ type MockCommand struct {
 	StdoutW    io.Writer
 	StderrW    io.Writer
 	StdinR     io.Reader
+	RunFunc    func() error
 }
 
 func (m *MockCommand) Output() ([]byte, error)         { return m.OutputData, m.OutputErr }
 func (m *MockCommand) CombinedOutput() ([]byte, error) { return m.OutputData, m.OutputErr }
-func (m *MockCommand) Run() error                      { return m.RunErr }
-func (m *MockCommand) SetStdout(w io.Writer)           { m.StdoutW = w }
-func (m *MockCommand) SetStderr(w io.Writer)           { m.StderrW = w }
-func (m *MockCommand) SetStdin(r io.Reader)            { m.StdinR = r }
+func (m *MockCommand) Run() error {
+	if m.RunFunc != nil {
+		if err := m.RunFunc(); err != nil {
+			return err
+		}
+	}
+	return m.RunErr
+}
+func (m *MockCommand) SetStdout(w io.Writer) { m.StdoutW = w }
+func (m *MockCommand) SetStderr(w io.Writer) { m.StderrW = w }
+func (m *MockCommand) SetStdin(r io.Reader)  { m.StdinR = r }
 
 // MockExecutor is a test double for Executor interface.
 type MockExecutor struct {
