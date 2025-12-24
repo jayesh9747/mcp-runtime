@@ -197,11 +197,7 @@ kubectl set env deployment/mcp-runtime-operator-controller-manager \
 # 1. Clone and build
 git clone https://mcp-runtime.git
 cd mcp-runtime
-<<<<<<< Updated upstream
-make install && make build
-=======
 make deps && make build-runtime
->>>>>>> Stashed changes
 
 # 2. Setup platform
 ./bin/mcp-runtime setup
